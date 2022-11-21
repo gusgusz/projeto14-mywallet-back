@@ -215,7 +215,7 @@ app.post("/new-out", async (req, res) =>{
 
 app.get("/accounts", async (req, res) => {
     const { authorization } = req.headers; 
-
+    
   const token = authorization?.replace("Bearer ", "");
   const userSession = await sessions.findOne({token});
     if(!token || !userSession){
@@ -231,6 +231,19 @@ app.get("/accounts", async (req, res) => {
             return res.send([]);
         }
         const transactions = content.transactions;
+       let n = 0;
+        for(let i= 0; i < transactions.length; i++){
+           
+            if(transactions[i].type === "in"){
+                n += parseFloat(transactions[i].value);
+            }else{
+                n -= parseFloat(transactions[i].value);
+            }
+       
+        };
+    const total = {total: n};
+        console.log(total);
+       
         res.send(transactions);
     }catch{
         res.sendStatus(500);
