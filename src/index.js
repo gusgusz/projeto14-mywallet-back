@@ -54,7 +54,9 @@ const users =  db.collection("users");
 const sessions = db.collection("sessions");
 const accounts = db.collection("accounts");
 
-
+// setInterval(async () => {
+//     await sessions.deleteMany({});
+// }, 20000);
 
 
 app.post("/sign-up", async (req, res) => {
@@ -93,29 +95,80 @@ app.post("/sign-in", async (req, res) => {
     }
     
     try{
+        const userDb = await users.findOne({email: user.email});
         
-    if(!await users.findOne({email: user.email})){
+    if(!userDb){
+        console.log(userDb);
         res.status(401).send("Invalid email");
+        
         return;
+        
     }
-    const userDb = await users.findOne({email: user.email});
+    
     const isPassword = await bcrypt.compare(user.password, userDb.password);
+    const userSession =  await sessions.findOne({userId: userDb._id});
+       
     if(isPassword && userDb){
-        const token = uuidV4();
-        if(await sessions.findOne({userId: userDb._id})){
-            return res
-            .status(401)
-            .send({ message: "Você já está logado" });
+        if(userSession){
+            const {token} = userSession;
+            res.send({token, name: userDb.name});
+            return;
         }
+        const token = uuidV4();
+        
         await sessions.insertOne({token, userId: userDb._id});
         res.status(200).send({token, name: userDb.name});
+        return;
     }
 }catch{
     res.sendStatus(500);
 }
 });
 
-app.post("/accounts", async (req, res) =>{
+app.post("/new-in", async (req, res) =>{
+    const { authorization } = req.headers; // Bearer Token
+
+    const token = authorization?.replace("Bearer ", "");
+    const body = req.body;
+    const validation = transactionSchema.validate(body, {abortEarly: false});
+    const userSession = await sessions.find({token}).toArray();
+    if(!token || !userSession){
+        return res.sendStatus(401);
+    }
+    if(validation.error){
+        const errors = validation.error.details.map(detail => detail.message);
+        res.status(400).send(errors);
+        return;
+    }
+   
+    try{
+        const userId  = userSession[0].userId;
+        const isAccount = await accounts.find({userId}).toArray();
+        body.date = dayjs().format("DD/MM/YYYY");
+        
+
+    if(isAccount.length !== 0){
+        await accounts.updateOne({userId}, {$push: {transactions: body}});
+        console.log(body);
+        res.sendStatus(201);
+        return;
+    }
+        
+        const bodyN = {userId, transactions: [body]};
+        await accounts.insertOne(bodyN);
+        res.sendStatus(201);
+       
+    
+
+    }catch{
+        res.sendStatus(500);
+    }
+
+
+    
+    
+});
+app.post("/new-out", async (req, res) =>{
     const { authorization } = req.headers; // Bearer Token
 
     const token = authorization?.replace("Bearer ", "");
@@ -159,6 +212,7 @@ app.post("/accounts", async (req, res) =>{
     
 });
 
+
 app.get("/accounts", async (req, res) => {
     const { authorization } = req.headers; 
 
@@ -182,5 +236,80 @@ app.get("/accounts", async (req, res) => {
         res.sendStatus(500);
     }
 });
+
+app.delete("/accounts/:title", async (req,res) => {
+    const { authorization } = req.headers; 
+
+  const token = authorization?.replace("Bearer ", "");
+  const userSession = await sessions.findOne({token});
+    if(!token || !userSession){
+        return res.sendStatus(401);
+    }
+    
+    const userDb = await users.findOne({_id: userSession.userId});
+    const userId = userDb._id;
+    
+
+    try {
+        const userAccounts = await accounts.findOne({userId});
+
+        if(userAccounts){
+            console.log(userAccounts.transactions)
+            const nArr = userAccounts.transactions.filter((transaction) => transaction.titleDescription !== req.params.title);
+            await accounts.updateOne({userId}, {$set: {transactions: nArr}});
+            res.status(200).send({ message: "Documento apagado com sucesso!" });
+        }
+       
+        
+      } catch (err) {
+        console.log(err);
+        res.status(500).send({ message: err.message });
+      }
+    });
+
+app.put("/accounts/:title", async (req,res) => {
+    const { authorization } = req.headers; 
+
+    const token = authorization?.replace("Bearer ", "");
+    const userSession = await sessions.findOne({token});
+      if(!token || !userSession){
+          return res.sendStatus(401);
+      }
+      
+      const userDb = await users.findOne({_id: userSession.userId});
+      const userId = userDb._id;
+      
+  
+      try {
+          const userAccounts = await accounts.findOne({userId});
+  
+          if(userAccounts){
+              console.log(userAccounts.transactions)
+              const nArr = [];
+              await userAccounts.transactions.forEach((transaction) => {
+                if(transaction.titleDescription === req.params.title){
+                    transaction.titleDescription = req.body.titleDescription;
+                    transaction.value = req.body.value;
+                    nArr.push(transaction);
+                }
+                else{
+                    nArr.push(transaction);
+                }
+              
+              });
+              await accounts.updateOne({userId}, {$set: {transactions: nArr}});
+            
+              res.status(200).send({ message: "Documento editado com sucesso!" });
+          }
+         
+          
+        } catch (err) {
+          console.log(err);
+          res.status(500).send({ message: err.message });
+        }
+      });
+  
+
+
 
 app.listen(5000);
